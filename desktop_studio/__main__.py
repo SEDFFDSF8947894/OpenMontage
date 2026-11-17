@@ -35,7 +35,7 @@ QLabel#heading { font-size:22px; font-weight:700; }
 """
 
 def default_project():
-    return {"title":"Untitled project", "prompt":"", "script":"", "pipeline":"documentary",
+    return {"title":"Untitled project", "prompt":"", "script":"", "pipeline":"documentary-montage",
             "ratio":"16:9", "duration":60, "media":[], "scenes":[]}
 
 class Studio(QMainWindow):
@@ -105,7 +105,7 @@ class Studio(QMainWindow):
         self.prompt_edit.setPlaceholderText("اكتب فكرة الفيديو أو البرومبت بالتفصيل...")
         v.addWidget(self.prompt_edit,2)
         row=QHBoxLayout()
-        self.pipeline=QComboBox();self.pipeline.addItems(["documentary","animation","commercial","music_video","custom"])
+        self.pipeline=QComboBox();self.pipeline.addItems(["documentary-montage","cinematic","animation","animated-explainer","hybrid","talking-head","screen-demo","clip-factory","podcast-repurpose","character-animation","avatar-spokesperson","localization-dub"])
         self.ratio=QComboBox();self.ratio.addItems(["16:9","9:16","1:1"])
         self.duration=QSpinBox();self.duration.setRange(5,3600);self.duration.setSuffix(" sec")
         for label,widget in [("Pipeline",self.pipeline),("Aspect",self.ratio),("Duration",self.duration)]:
@@ -117,6 +117,7 @@ class Studio(QMainWindow):
         actions=QHBoxLayout()
         actions.addWidget(self._button("Save project",self.save_project,True))
         actions.addWidget(self._button("Run local preflight",self.run_preflight))
+        actions.addWidget(self._button("Export agent brief",self.export_agent_brief))
         self.generate=self._button("Generate with AI — coming next",self.generation_info)
         actions.addWidget(self.generate)
         v.addLayout(actions)
@@ -188,7 +189,7 @@ class Studio(QMainWindow):
         self.title_edit.setText(p.get("title","Untitled project"))
         self.prompt_edit.setPlainText(p.get("prompt",""))
         self.script_edit.setPlainText(p.get("script",""))
-        for widget,value in [(self.pipeline,p.get("pipeline","documentary")),(self.ratio,p.get("ratio","16:9"))]:
+        for widget,value in [(self.pipeline,p.get("pipeline","documentary-montage")),(self.ratio,p.get("ratio","16:9"))]:
             i=widget.findText(value)
             if i>=0:widget.setCurrentIndex(i)
         self.duration.setValue(int(p.get("duration",60)))
@@ -301,6 +302,47 @@ class Studio(QMainWindow):
         self.process.readyReadStandardError.connect(lambda:self.log.appendPlainText(bytes(self.process.readAllStandardError()).decode(errors="replace")))
         self.process.finished.connect(lambda code,status:self.statusBar().showMessage("Preflight exit code: "+str(code)))
         self.process.start(sys.executable,[str(ROOT/"scripts"/"production_readiness.py")])
+
+    def export_agent_brief(self):
+        """Export a reviewable brief for an OpenMontage-compatible agent, without execution."""
+        self._capture()
+        selected = self.project["pipeline"]
+        manifest = ROOT / "pipeline_defs" / (selected + ".yaml")
+        if not manifest.is_file():
+            return QMessageBox.warning(self, "Pipeline missing", "Cannot locate manifest: " + str(manifest))
+        output = Path(self.output_edit.text().strip() or str(PROJECT_DIR / "Exports")).expanduser()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export agent brief", str(PROJECT_DIR / "production_brief.md"), "Markdown (*.md)")
+        if not path:
+            return
+        safe_title = self.project["title"].replace("\\r", " ").replace("\\n", " ")
+        brief = (
+            "# OpenMontage production request\\n\\n"
+            "This is a handoff document, NOT an executed production.\\n"
+            "Follow AGENT_GUIDE.md and PROJECT_CONTEXT.md. The AI agent must read the selected "
+            "pipeline manifest, stage director skills and provider-specific skills, run preflight, "
+            "estimate costs, and request approval before any paid or consequential generation.\\n\\n"
+            f"## Title\\n{safe_title}\\n\\n"
+            f"## Pipeline\\n{selected}\\n\\n"
+            f"## Duration\\n{self.project['duration']} seconds\\n\\n"
+            f"## Aspect ratio\\n{self.project['ratio']}\\n\\n"
+            f"## Requested output directory\\n{output}\\n\\n"
+            f"## Prompt\\n{self.project['prompt']}\\n\\n"
+            f"## Script\\n{self.project['script']}\\n\\n"
+            "## Planned scenes\\n" +
+            "\\n".join("- " + str(scene) for scene in self.project["scenes"]) +
+            "\\n\\n## Local media paths\\n" +
+            "\\n".join("- " + str(media) for media in self.project["media"]) +
+            "\\n\\n## Approval\\nDo not incur costs or publish without explicit user approval.\\n"
+        )
+        try:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(brief, encoding="utf-8")
+            self.statusBar().showMessage("Exported agent brief: " + str(target))
+            QMessageBox.information(self, "Brief exported", "Saved production brief. No AI generation was started.")
+        except OSError as e:
+            QMessageBox.critical(self, "Export failed", str(e))
 
     def generation_info(self):
         QMessageBox.information(self,"Not connected yet",
